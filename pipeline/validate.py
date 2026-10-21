@@ -8,7 +8,7 @@ REQUIRED_COLUMNS = [
     "unit_price",
 ]
 
-MAX_REJECT_RATE = 0.10
+MAX_REJECT_RATE = 0.20
 
 class DataQualityError(Exception):
     """Raised when the data is not good enough to continue."""

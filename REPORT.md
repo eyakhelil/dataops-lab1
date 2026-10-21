@@ -41,4 +41,27 @@ tests ont continué à passer. Le test a donc détecté la régression.
   tableau écrit à la main dont je connais la bonne réponse.
 - Un contrôle de données vérifie que les données du jour sont acceptables, sur
   les vraies données, à chaque exécution du pipeline.
-  
+## Q11
+|  | Ancien script | Votre pipeline |
+| --- | --- | --- |
+| Jour 2 : message d'erreur ? | Non, aucune erreur | Oui : PIPELINE STOPPED, taux de rejet 100 % (6 lignes sur 6) |
+| Jour 2 : total affiché | 270200 (faux) | Aucun total, rien n'est publié |
+| Jour 3 : message d'erreur ? | Oui, mais un KeyError: 'unit_price' brut, difficile à comprendre | Oui : PIPELINE STOPPED: Missing columns: ['unit_price'] |
+
+## Q12
+Jour 2 : les prix ne sont plus dans la même unité. Ils sont multipliés par 100
+(44900 au lieu de 449.0), probablement exprimés en centimes. Jour 3 : la
+colonne unit_price a été renommée en price, donc le schéma a changé.
+
+## Q13
+Le jour 2 est le plus dangereux. L'ancien script ne plante pas et affiche un
+total (270200) qui a l'air normal mais qui est environ 100 fois trop grand
+(le vrai total serait 2702.00). Personne ne sait qu'il y a un problème et le
+mauvais chiffre peut être publié et utilisé pour décider. Au jour 3, le script
+plante avec une erreur visible : on sait au moins qu'il y a un problème.
+
+## Q14
+Le code de sortie 1 peut être lu par un orchestrateur (cron, Airflow), par
+une CI (GitHub Actions) ou par un script de supervision, pour arrêter la suite
+du traitement et déclencher une alerte, sans qu'un humain lise la console.
+Un code 0 veut dire succès, un code différent de 0 veut dire échec.
