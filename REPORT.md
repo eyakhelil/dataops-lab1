@@ -92,3 +92,61 @@ l'empreinte change complètement, et DVC sait alors que les données ont changé
 C'est le fichier data/.gitignore, créé par dvc add. Il contient /raw, donc Git
 ignore le dossier data/raw. Seul le petit fichier pointeur data/raw.dvc est
 suivi par Git.
+### Q5
+Les fichiers de dvc-storage sont nommés par leur empreinte md5 (le hash de leur
+contenu), répartie en dossiers de deux caractères (par exemple 2b/3c16...). C'est
+une bonne idée parce que deux versions différentes d'un même fichier ont des
+empreintes différentes : elles ne s'écrasent jamais et peuvent coexister dans le
+stockage. Et deux fichiers identiques ne sont stockés qu'une fois.
+### Q6
+git diff data/raw.dvc n'a montré que deux lignes modifiées (md5 et size). C'est
+suffisant pour Git parce que Git ne suit pas les données, il suit seulement le
+petit fichier pointeur. Le md5 identifie le contenu exact du dossier, donc
+changer le md5 revient à dire "ce commit utilise d'autres données". Il faut
+quand même commiter, sinon Git n'enregistre pas quelle version des données va
+avec quelle version du code : sans commit, impossible de revenir en arrière
+avec un tag ou de partager la nouvelle version.
+
+### Q7
+Non, le code n'a pas changé entre data-v1 et data-v2, seules les données ont
+changé (5 commandes ajoutées). Total avec data-v1 : 7655.90. Total avec
+data-v2 : 8835.40. L'écart de 1179.50 correspond exactement aux 5 commandes en
+retard (458 + 135 + 449 + 78 + 59.50).
+### Q8
+`git checkout data-v1 -- data/raw.dvc` a seulement remis le petit fichier
+pointeur (le md5) tel qu'il était à data-v1 : les vrais CSV n'ont pas bougé.
+`dvc checkout` lit ce pointeur et remplace les fichiers de data/raw par la
+version correspondante, qu'il va chercher dans le cache DVC.
+
+### Q9
+Si on oublie dvc checkout, le pointeur dit "v1" mais les fichiers sont encore
+ceux de v2. dvc status signale "modified: data\raw", mais le pipeline tourne
+quand même, sans erreur, sur les données de v2 et affiche 8835.40 au lieu de
+7655.90. C'est dangereux pour un rapport : on croit avoir reconstruit l'ancien
+chiffre alors qu'on a recalculé le nouveau, sans aucun message d'alerte.
+### Q10
+git clone a donné au collègue le code (pipeline, tests, run_pipeline.py), tout
+l'historique Git, les tags et le petit fichier pointeur data/raw.dvc, mais pas
+les données. dvc pull lui a donné les vrais fichiers CSV de data/raw, récupérés
+depuis le remote DVC, dans la version indiquée par le pointeur (ici data-v2).
+
+### Q11
+Si j'avais oublié dvc push à l'étape 4, le remote ne contiendrait que la
+version v1. Le pointeur de v2 (md5 94103799...) serait dans Git, mais ses
+fichiers n'existeraient pas dans dvc-storage. Le dvc pull du collègue
+échouerait avec une erreur (fichiers introuvables dans le remote), il n'aurait
+pas le bon data/raw et ne pourrait pas obtenir le total 8835.40.
+
+### Q12
+- "Ça marche sur ma machine" : c'est la douleur la plus réduite. Avec git clone
+  + dvc pull (étape 6), un collègue obtient le même code, les mêmes données et le
+  même total. Le remote DVC (étape 3) rend les données partageables.
+- Erreurs silencieuses : en partie. Le pointeur .dvc, dvc status (étape 4) et les
+  tags (étape 5) permettent de savoir quelle version des données a produit quel
+  chiffre et de voir quand elles ont changé. Mais oublier dvc checkout reste
+  silencieux (Q9).
+- Livraison lente : un peu, avec les branches (étape 1) qui permettent de
+  tester une règle sans toucher à main.
+- Étapes manuelles : pas vraiment réduites, tout est encore lancé à la main
+  (le bonus dvc repro irait dans ce sens).
+  
