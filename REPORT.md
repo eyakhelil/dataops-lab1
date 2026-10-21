@@ -65,3 +65,30 @@ Le code de sortie 1 peut être lu par un orchestrateur (cron, Airflow), par
 une CI (GitHub Actions) ou par un script de supervision, pour arrêter la suite
 du traitement et déclencher une alerte, sans qu'un humain lise la console.
 Un code 0 veut dire succès, un code différent de 0 veut dire échec.
+
+
+## TP2
+
+### Q1
+Non, pendant que je travaillais sur la branche, main ne contenait pas la règle 6.
+Elle est apparue sur main avec la commande `git merge --no-ff feature/country-rule`.
+C'est utile parce que le rapport tourne chaque nuit depuis main : on peut
+développer et tester une règle sans risquer de casser ou de changer le rapport
+de la nuit. main ne reçoit que du code déjà testé.
+
+### Q2
+Une pull request permet qu'un collègue relise le code et le commente avant la
+fusion, elle garde une trace de la discussion, et elle peut lancer les tests
+automatiquement (CI) avant d'accepter la fusion. On peut aussi protéger main pour
+interdire de la modifier sans relecture. Un git merge local ne fait rien de tout ça.
+
+### Q3
+Ma ligne md5 dans data/raw.dvc : `md5: <colle ici TA valeur, qui finit par .dir>`
+Elle identifie le contenu exact du dossier data/raw (une empreinte calculée à
+partir de tous les fichiers). Si je change un seul caractère dans un des CSV,
+l'empreinte change complètement, et DVC sait alors que les données ont changé.
+
+### Q4
+C'est le fichier data/.gitignore, créé par dvc add. Il contient /raw, donc Git
+ignore le dossier data/raw. Seul le petit fichier pointeur data/raw.dvc est
+suivi par Git.
