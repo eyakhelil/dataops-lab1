@@ -149,4 +149,125 @@ pas le bon data/raw et ne pourrait pas obtenir le total 8835.40.
   tester une règle sans toucher à main.
 - Étapes manuelles : pas vraiment réduites, tout est encore lancé à la main
   (le bonus dvc repro irait dans ce sens).
-  
+  ## TP3
+
+### Q1
+En chargeant tout en texte, on ne perd aucune valeur : une quantité -2 ou une
+date 2026-13-45 arrivent telles quelles. Si DuckDB devinait les types, il
+pourrait échouer au chargement (une date impossible), ou convertir à sa façon.
+Le jour où une quantité vaut "deux", DuckDB aurait deviné "entier" sur les
+premières lignes puis planté en plein chargement, ou aurait tout converti en
+texte sans prévenir. Là, le chargement ne plante jamais, et le choix des types
+et des règles est fait ensuite, dans le staging, en SQL, où on le voit et où on
+le teste.
+
+### Q2
+Le total naïf en SQL (13950.6) est aussi faux que celui de Python : le langage
+n'a aucun rapport avec la fiabilité. Un SQL sans règles de nettoyage calcule
+sans broncher sur des données sales (doublon, prix 4500, quantité négative).
+Ce qui rend un pipeline fiable, ce sont les contrôles (règles, tests, arrêt de
+la chaîne) et le fait de savoir d'où vient chaque chiffre, pas la technologie.
+
+### Q3
+Le brut est conservé tel quel dans raw.orders. Si une règle est fausse, on
+corrige le SQL et on recalcule tout à partir du brut, sans retélécharger ni
+redemander le fichier. On peut aussi comparer l'avant et l'après, retrouver
+l'origine d'un chiffre (_source_file, _loaded_at) et rejouer l'historique avec
+la nouvelle règle. Avec un ETL, on a seulement le résultat nettoyé et la donnée
+d'origine est perdue.
+### Q4
+Dans profiles.yml il faudrait changer le type de l'adaptateur (snowflake ou
+bigquery au lieu de duckdb) et remplacer le chemin du fichier par les infos de
+connexion : compte, utilisateur, base de données, schéma, entrepôt de calcul.
+Le mot de passe ne doit jamais être écrit en clair dans le fichier, ni dans Git.
+On le lit dans une variable d'environnement (par exemple {{ env_var('DBT_PASSWORD') }})
+ou dans un gestionnaire de secrets, et en CI on le met dans les secrets du
+dépôt. On peut aussi garder profiles.yml hors du dépôt.
+### Q5
+Le staging ne doit pas décider quelles lignes sont mauvaises : son rôle est de
+donner les bons types et de réparer ce qui peut l'être. Supprimer la commande
+1013 dès le staging la ferait disparaître sans trace, sans motif et sans qu'on
+puisse la retrouver. En la gardant avec une date vide, on laisse la couche
+suivante la rejeter explicitement avec un motif (invalid_date), et elle finit
+dans la quarantaine.
+
+### Q6
+Une vue est une requête enregistrée, pas des données stockées : à chaque lecture,
+DuckDB relit raw.orders et réapplique la transformation. C'est acceptable pour
+du staging parce que la transformation est légère (des conversions de types), la
+table brute est petite, et on a toujours des données à jour sans rien stocker en
+double. On réserve les tables aux résultats lus souvent ou coûteux à calculer
+(les marts).
+### Q7
+Dans target/compiled/shop/models/intermediate/int_orders_checked.sql,
+{{ ref('stg_orders') }} a été remplacé par le vrai nom complet de la vue dans
+DuckDB : "warehouse"."main"."stg_orders". dbt transforme le Jinja en SQL pur,
+et grâce à ref il sait que stg_orders doit être construit avant ce modèle.
+
+### Q8
+row_number() over (partition by order_id order by _row_number) regroupe les
+lignes qui ont le même order_id, les classe selon leur position dans le fichier
+(_row_number), et leur donne 1, 2, 3... La première ligne de chaque commande
+reçoit 1, les répétitions reçoivent 2 ou plus : le "> 1" repère donc les
+doublons et garde la première, comme keep="first" en pandas. On a eu besoin de
+_row_number parce qu'une table SQL n'a pas d'ordre garanti : sans cette colonne
+on ne saurait pas quelle ligne est "la première".
+
+### Q9
+L'analyste crée models/marts/revenue_by_product.sql, avec un select qui lit
+{{ ref('orders_clean') }} et fait sum(quantity * unit_price) group by product.
+Il ne touche à aucun fichier Python : dbt run construit le nouveau modèle après
+orders_clean, grâce à ref.
+### Q11
+| Contrôle du TP1 (Python) | Son équivalent dbt |
+| --- | --- |
+| check_schema | La déclaration de la source (sources.yml) et le modèle de staging : si une colonne manque, stg_orders échoue (voir jour 3). Les tests not_null et accepted_values vérifient aussi le contenu |
+| Les règles 1 à 6 dans clean_orders | Le case when de int_orders_checked.sql (une ligne par règle) |
+| check_reject_rate | Le test singulier assert_reject_rate_below_20_percent.sql |
+| rejected_orders.csv | La table orders_rejected |
+| PIPELINE STOPPED, rien n'est publié | dbt build : un test en échec met FAIL, les modèles en aval sont SKIP, code de sortie 1 |
+### Q10
+Quand j'ai cassé la règle 5, le test unique_orders_clean_order_id a échoué
+(Got 1 result) : le doublon de la commande 1010 n'était plus rejeté et est
+entré dans orders_clean. Ont été SKIP : le modèle revenue_by_country et le test
+unique_revenue_by_country_country, qui dépendent de orders_clean. dbt build
+finit avec ERROR=1 SKIP=2 et un code de sortie 1. C'est ce qu'on veut : le
+rapport du directeur n'est pas reconstruit avec des données sales, donc il
+garde les chiffres de la veille (c'est l'arrêt de la chaîne du TP1).
+### Q12
+Les données du test unitaire venaient du fichier YAML lui-même (la section
+given : des lignes écrites à la main dans int_orders_checked.yml). dbt remplace
+temporairement ref('stg_orders') par ces lignes, sans lire raw.orders ni aucun
+CSV. C'est important pour la CI de la séance 4 : sur une machine vierge (le
+runner GitHub Actions), il n'y a ni warehouse.duckdb, ni data/raw (les données
+sont sous DVC), et le test fonctionne quand même. Il est aussi rapide et ne
+dépend pas des données du jour.
+### Q13
+Si country arrive vide dans la source, le graphe montre tout ce qui est en aval
+de raw.orders : stg_orders, int_orders_checked (règle unknown_country, toutes
+les lignes seraient rejetées), orders_clean, orders_rejected et
+revenue_by_country. Les tests accepted_values et le test du taux de rejet
+(assert_reject_rate_below_20_percent) arrêteraient la chaîne. Avec le graphe,
+j'ai la réponse en quelques secondes. Sans lui, dans un dossier de 200 scripts
+SQL, il faudrait ouvrir les scripts un par un et chercher qui lit la colonne
+country, ce qui peut prendre des heures et risque d'oublier une dépendance.
+### Q14
+|  | Pipeline Python (TP1) | Pipeline dbt (TP3) |
+| --- | --- | --- |
+| Jour 2 : quel contrôle arrête la chaîne ? | check_reject_rate (taux de rejet 100 %, limite 20 %) | Le test assert_reject_rate_below_20_percent (FAIL 1) |
+| Jour 3 : quel message d'erreur ? | PIPELINE STOPPED: Missing columns: ['unit_price'] (check_schema) | Binder Error: Table "src" does not have a column named "unit_price", Candidate bindings: "price" (échec de stg_orders) |
+| Le rapport de la veille est-il conservé ? | Oui, revenue_by_country.csv n'est pas réécrit | Oui, revenue_by_country vaut toujours 8835.40 |
+| Code de sortie | 1 | 1 |
+
+### Q15
+C'est un problème : orders_rejected a été SKIP au jour 2, donc la quarantaine
+contient encore les rejets du jour 1 et rien sur les 6 lignes rejetées du
+jour 2. Quelqu'un qui la lit croirait que le jour 2 n'a posé aucun problème,
+alors que c'est justement le jour où on aurait besoin de voir les lignes
+rejetées pour comprendre (les prix en centimes). Pour garder la quarantaine
+tout en bloquant le rapport : faire porter le test du taux de rejet sur
+orders_clean et orders_rejected (au lieu de int_orders_checked). Les deux
+tables sont alors construites avant le test, et seul revenue_by_country, qui
+dépend de orders_clean, est SKIP. On peut aussi garder un historique de la
+quarantaine en ajoutant les rejets de chaque jour avec _source_file et
+_loaded_at, au lieu de remplacer la table.
